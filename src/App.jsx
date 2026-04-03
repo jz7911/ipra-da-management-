@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './supabase'
 import AuthPage from './AuthPage'
 
-// ─── Helpers ────────────────────────────────────────────────────────
 function renumber(standards, sectionKey) {
   return standards.map((s, i) => ({ ...s, std_key: `${sectionKey}.${i + 1}`, sort_order: i }))
 }
@@ -34,16 +33,109 @@ function Modal({ children, onClose, wide }) {
   )
 }
 
-function FL({ children, sub }) {
+// ─── User Management Modal ────────────────────────────────────────────
+function UsersModal({ onClose, currentUserId, showToast }) {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState(null)
+
+  const loadUsers = useCallback(async () => {
+    const { data } = await supabase.from('profiles').select('*').order('full_name')
+    setUsers(data || [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { loadUsers() }, [loadUsers])
+
+  const setRole = async (userId, newRole) => {
+    setUpdating(userId)
+    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId)
+    if (error) {
+      showToast('Failed to update role', 'error')
+    } else {
+      setUsers(u => u.map(x => x.id === userId ? { ...x, role: newRole } : x))
+      showToast(`Role updated to ${newRole}`)
+    }
+    setUpdating(null)
+  }
+
+  const roleInfo = {
+    admin:  { label: 'Admin',  desc: 'Can edit, delete, add, and manage users', bg: '#EEEDFE', color: '#3C3489', border: '#AFA9EC' },
+    editor: { label: 'Editor', desc: 'Can edit and add standards',               bg: '#e6f1fb', color: '#0c447c', border: '#B5D4F4' },
+    viewer: { label: 'Viewer', desc: 'Can browse and export only',               bg: '#f8f8f7', color: '#555550', border: 'rgba(0,0,0,0.15)' },
+  }
+
   return (
-    <div style={{ marginBottom: 5 }}>
-      <label style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500 }}>{children}</label>
-      {sub && <span style={{ fontSize: 11, color: '#999992', marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>{sub}</span>}
-    </div>
+    <Modal onClose={onClose} wide>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4, color: '#1a1a1a' }}>User management</div>
+      <div style={{ fontSize: 13, color: '#999992', marginBottom: 20 }}>Everyone who has signed in. Click a role to change it.</div>
+
+      {/* Role legend */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
+        {Object.entries(roleInfo).map(([key, r]) => (
+          <div key={key} style={{ border: `0.5px solid ${r.border}`, borderRadius: 8, padding: '10px 12px', background: r.bg }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: r.color, marginBottom: 3 }}>{r.label}</div>
+            <div style={{ fontSize: 11, color: r.color, opacity: 0.8, lineHeight: 1.4 }}>{r.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ padding: '30px 0', textAlign: 'center', color: '#999992', fontSize: 13 }}>Loading users…</div>
+      ) : (
+        <div style={{ border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 10, overflow: 'hidden' }}>
+          {users.map((user, i) => {
+            const r = roleInfo[user.role] || roleInfo.viewer
+            const isMe = user.id === currentUserId
+            return (
+              <div key={user.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: i < users.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none', background: '#fff' }}>
+                {/* Avatar */}
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#e6f1fb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600, color: '#0c447c', flexShrink: 0 }}>
+                  {(user.full_name || user.email || '?').charAt(0).toUpperCase()}
+                </div>
+
+                {/* Name + email */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#1a1a1a' }}>
+                    {user.full_name || 'Unknown'}
+                    {isMe && <span style={{ fontSize: 11, color: '#999992', fontWeight: 400, marginLeft: 6 }}>(you)</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#999992', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>
+                </div>
+
+                {/* Role buttons */}
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  {Object.entries(roleInfo).map(([key, ri]) => (
+                    <button
+                      key={key}
+                      disabled={updating === user.id || (isMe && key !== 'admin')}
+                      onClick={() => user.role !== key && setRole(user.id, key)}
+                      style={{
+                        fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: user.role === key || updating === user.id ? 'default' : 'pointer', fontFamily: 'inherit',
+                        background: user.role === key ? ri.bg : 'transparent',
+                        color: user.role === key ? ri.color : '#999992',
+                        border: `0.5px solid ${user.role === key ? ri.border : 'rgba(0,0,0,0.1)'}`,
+                        fontWeight: user.role === key ? 500 : 400,
+                        opacity: updating === user.id ? 0.5 : 1,
+                      }}>
+                      {ri.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+        <button onClick={onClose} style={{ padding: '7px 16px', fontFamily: 'inherit' }}>Close</button>
+      </div>
+    </Modal>
   )
 }
 
-// ─── Edit Standard Modal ─────────────────────────────────────────────
+// ─── Edit Standard Modal ──────────────────────────────────────────────
 function EditModal({ std, mode, sectionKey, totalInSection, onSave, onClose }) {
   const maxPos = mode === 'add' ? totalInSection + 1 : totalInSection
   const currentPos = mode === 'edit' ? (std.sort_order + 1) : maxPos
@@ -62,31 +154,27 @@ function EditModal({ std, mode, sectionKey, totalInSection, onSave, onClose }) {
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 20, color: '#1a1a1a' }}>
         {mode === 'add' ? 'Add standard' : `Edit ${std?.std_key}`}
       </div>
-
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div>
-          <FL>Title</FL>
+          <div style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 5 }}>Title</div>
           <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="Standard title..." autoFocus
             style={{ width: '100%', fontSize: 14, padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.18)', borderRadius: 8, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
         </div>
         <div>
-          <FL>Position in section</FL>
+          <div style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 5 }}>Position in section</div>
           <select value={form.position} onChange={e => set('position', parseInt(e.target.value))}
             style={{ width: '100%', fontSize: 13, padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.18)', borderRadius: 8, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', background: '#fff' }}>
             {Array.from({ length: maxPos }, (_, i) => i + 1).map(n => (
               <option key={n} value={n}>
-                {mode === 'add'
-                  ? (n === maxPos ? `${n} — end of section` : `${n} — insert before ${sectionKey}.${n}`)
-                  : (n === currentPos ? `${n} — current` : `${n}`)}
+                {mode === 'add' ? (n === maxPos ? `${n} — end of section` : `${n} — insert before ${sectionKey}.${n}`) : (n === currentPos ? `${n} — current` : `${n}`)}
               </option>
             ))}
           </select>
           <div style={{ fontSize: 11, color: '#999992', marginTop: 4 }}>Others renumber automatically</div>
         </div>
       </div>
-
       <div style={{ marginBottom: 14 }}>
-        <FL>Type</FL>
+        <div style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 5 }}>Type</div>
         <div style={{ display: 'flex', gap: 8 }}>
           {['M', 'O'].map(t => (
             <button key={t} onClick={() => set('type', t)} style={{ padding: '6px 18px', fontSize: 13, fontWeight: form.type === t ? 500 : 400, background: form.type === t ? (t === 'M' ? '#fcebeb' : '#e1f5ee') : '#f8f8f7', color: form.type === t ? (t === 'M' ? '#791f1f' : '#085041') : '#555550', border: `0.5px solid ${form.type === t ? (t === 'M' ? '#f7c1c1' : '#9FE1CB') : 'rgba(0,0,0,0.12)'}`, borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -95,28 +183,23 @@ function EditModal({ std, mode, sectionKey, totalInSection, onSave, onClose }) {
           ))}
         </div>
       </div>
-
       <div style={{ marginBottom: 14 }}>
-        <FL>Commentary</FL>
+        <div style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 5 }}>Commentary</div>
         <textarea rows={4} value={form.commentary} onChange={e => set('commentary', e.target.value)} placeholder="Describe the intent of this standard..."
           style={{ width: '100%', fontSize: 13, padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.18)', borderRadius: 8, outline: 'none', fontFamily: 'inherit', resize: 'vertical', lineHeight: 1.6, boxSizing: 'border-box' }} />
       </div>
-
       <div style={{ marginBottom: 22 }}>
-        <FL sub="(one item per line)">Evidence of compliance</FL>
+        <div style={{ fontSize: 11, color: '#999992', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 500, marginBottom: 5 }}>
+          Evidence of compliance <span style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(one item per line)</span>
+        </div>
         <textarea rows={7} value={form.evidence} onChange={e => set('evidence', e.target.value)}
           style={{ width: '100%', fontSize: 12, padding: '8px 10px', border: '0.5px solid rgba(0,0,0,0.18)', borderRadius: 8, outline: 'none', fontFamily: "'JetBrains Mono', monospace", resize: 'vertical', lineHeight: 1.6, boxSizing: 'border-box' }}
           placeholder="a. Evidence item one&#10;b. Evidence item two&#10;c. Evidence item three" />
       </div>
-
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button onClick={onClose} style={{ padding: '7px 16px', fontFamily: 'inherit' }}>Cancel</button>
         <button disabled={saving || !form.title.trim()}
-          onClick={async () => {
-            setSaving(true)
-            await onSave({ ...form, evidence: form.evidence.split('\n').map(e => e.trim()).filter(Boolean) })
-            setSaving(false)
-          }}
+          onClick={async () => { setSaving(true); await onSave({ ...form, evidence: form.evidence.split('\n').map(e => e.trim()).filter(Boolean) }); setSaving(false) }}
           style={{ padding: '7px 20px', background: form.title.trim() && !saving ? '#1D9E75' : '#9FE1CB', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: form.title.trim() && !saving ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
           {saving ? 'Saving…' : mode === 'add' ? 'Add standard' : 'Save changes'}
         </button>
@@ -125,7 +208,7 @@ function EditModal({ std, mode, sectionKey, totalInSection, onSave, onClose }) {
   )
 }
 
-// ─── Version History Modal ───────────────────────────────────────────
+// ─── Version History Modal ────────────────────────────────────────────
 function HistoryModal({ std, onClose }) {
   const [versions, setVersions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -136,47 +219,43 @@ function HistoryModal({ std, onClose }) {
   }, [std.id])
 
   const changeBadge = (type) => {
-    const s = { created: { background: '#e1f5ee', color: '#085041', border: '0.5px solid #9FE1CB' }, updated: { background: '#e6f1fb', color: '#0c447c', border: '0.5px solid #B5D4F4' }, deleted: { background: '#fcebeb', color: '#791f1f', border: '0.5px solid #f7c1c1' } }
-    return <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 500, ...s[type] }}>{type}</span>
+    const s = { created: { bg: '#e1f5ee', color: '#085041', border: '#9FE1CB' }, updated: { bg: '#e6f1fb', color: '#0c447c', border: '#B5D4F4' }, deleted: { bg: '#fcebeb', color: '#791f1f', border: '#f7c1c1' } }[type]
+    return <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, fontWeight: 500, background: s.bg, color: s.color, border: `0.5px solid ${s.border}` }}>{type}</span>
   }
 
   return (
     <Modal onClose={onClose} wide>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4, color: '#1a1a1a' }}>Version history</div>
       <div style={{ fontSize: 13, color: '#999992', marginBottom: 20 }}>{std.std_key} — {std.title}</div>
-      {loading ? (
-        <div style={{ padding: '30px 0', textAlign: 'center', color: '#999992', fontSize: 13 }}>Loading…</div>
-      ) : versions.length === 0 ? (
-        <div style={{ padding: '30px 0', textAlign: 'center', color: '#999992', fontSize: 13 }}>No history yet.</div>
-      ) : (
-        <div style={{ border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 10, overflow: 'hidden', maxHeight: 460, overflowY: 'auto' }}>
-          {versions.map((v, i) => (
-            <div key={v.id} style={{ borderBottom: i < versions.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f8f8f7' }}>
-                {changeBadge(v.change_type)}
-                <span style={{ fontSize: 12, fontWeight: 500, color: '#1a1a1a' }}>{v.changed_by_name || 'Unknown'}</span>
-                <span style={{ fontSize: 11, color: '#999992', marginLeft: 'auto' }}>
-                  {new Date(v.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-              <div style={{ padding: '10px 14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#999992' }}>{v.std_key}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a1a' }}>{v.title}</span>
-                  <Badge type={v.type} />
+      {loading ? <div style={{ padding: '30px 0', textAlign: 'center', color: '#999992', fontSize: 13 }}>Loading…</div>
+        : versions.length === 0 ? <div style={{ padding: '30px 0', textAlign: 'center', color: '#999992', fontSize: 13 }}>No history yet.</div>
+        : (
+          <div style={{ border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 10, overflow: 'hidden', maxHeight: 460, overflowY: 'auto' }}>
+            {versions.map((v, i) => (
+              <div key={v.id} style={{ borderBottom: i < versions.length - 1 ? '0.5px solid rgba(0,0,0,0.07)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#f8f8f7' }}>
+                  {changeBadge(v.change_type)}
+                  <span style={{ fontSize: 12, fontWeight: 500, color: '#1a1a1a' }}>{v.changed_by_name || 'Unknown'}</span>
+                  <span style={{ fontSize: 11, color: '#999992', marginLeft: 'auto' }}>{new Date(v.changed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
-                {v.commentary && <div style={{ fontSize: 12, color: '#555550', fontStyle: 'italic', marginBottom: 4, lineHeight: 1.5 }}>{v.commentary}</div>}
-                {v.evidence?.map((e, j) => (
-                  <div key={j} style={{ fontSize: 12, color: '#555550', padding: '1px 0 1px 12px', position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 3, top: 6, width: 3, height: 3, borderRadius: '50%', background: '#aaa', display: 'inline-block' }} />
-                    {e}
+                <div style={{ padding: '10px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#999992' }}>{v.std_key}</span>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1a1a1a' }}>{v.title}</span>
+                    <Badge type={v.type} />
                   </div>
-                ))}
+                  {v.commentary && <div style={{ fontSize: 12, color: '#555550', fontStyle: 'italic', marginBottom: 4, lineHeight: 1.5 }}>{v.commentary}</div>}
+                  {v.evidence?.map((e, j) => (
+                    <div key={j} style={{ fontSize: 12, color: '#555550', padding: '1px 0 1px 12px', position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 3, top: 6, width: 3, height: 3, borderRadius: '50%', background: '#aaa', display: 'inline-block' }} />
+                      {e}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
         <button onClick={onClose} style={{ padding: '7px 16px', fontFamily: 'inherit' }}>Close</button>
       </div>
@@ -184,7 +263,7 @@ function HistoryModal({ std, onClose }) {
   )
 }
 
-// ─── Export Modal ────────────────────────────────────────────────────
+// ─── Export Modal ─────────────────────────────────────────────────────
 function ExportModal({ onClose, cats, year }) {
   const [selected, setSelected] = useState(() => { const s = {}; cats.forEach(c => { s[c.key] = true }); return s })
   const [format, setFormat] = useState(null)
@@ -276,15 +355,14 @@ function ExportModal({ onClose, cats, year }) {
   )
 }
 
-// ─── Standard Card ────────────────────────────────────────────────────
-function StdCard({ std, onEdit, onDelete, onHistory, showMeta }) {
+// ─── Standard Card ─────────────────────────────────────────────────────
+function StdCard({ std, onEdit, onDelete, onHistory, showMeta, canEdit }) {
   return (
     <div style={{ border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 12, marginBottom: 14, overflow: 'hidden' }}>
       <div style={{ padding: '12px 16px', background: '#f8f8f7', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: '#999992', marginBottom: 3 }}>
-            {std.std_key}
-            {showMeta && <span style={{ fontFamily: 'Inter, sans-serif', marginLeft: 8 }}>· {std.category_label} › {std.section_title}</span>}
+            {std.std_key}{showMeta && <span style={{ fontFamily: 'Inter, sans-serif', marginLeft: 8 }}>· {std.category_label} › {std.section_title}</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a1a' }}>{std.title}</span>
@@ -293,8 +371,10 @@ function StdCard({ std, onEdit, onDelete, onHistory, showMeta }) {
         </div>
         <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 2 }}>
           <button onClick={() => onHistory(std)} style={{ fontSize: 11, padding: '3px 10px', color: '#555550', border: '0.5px solid rgba(0,0,0,0.15)', background: 'transparent', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>History</button>
-          <button onClick={() => onEdit(std)} style={{ fontSize: 11, padding: '3px 10px', color: '#0c447c', border: '0.5px solid #B5D4F4', background: '#e6f1fb', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>Edit</button>
-          <button onClick={() => onDelete(std)} style={{ fontSize: 11, padding: '3px 10px', color: '#791f1f', border: '0.5px solid #f7c1c1', background: '#fcebeb', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
+          {canEdit && <>
+            <button onClick={() => onEdit(std)} style={{ fontSize: 11, padding: '3px 10px', color: '#0c447c', border: '0.5px solid #B5D4F4', background: '#e6f1fb', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>Edit</button>
+            <button onClick={() => onDelete(std)} style={{ fontSize: 11, padding: '3px 10px', color: '#791f1f', border: '0.5px solid #f7c1c1', background: '#fcebeb', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>Delete</button>
+          </>}
         </div>
       </div>
       {std.commentary && (
@@ -315,7 +395,7 @@ function StdCard({ std, onEdit, onDelete, onHistory, showMeta }) {
   )
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────
+// ─── Main App ──────────────────────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -333,6 +413,8 @@ export default function App() {
 
   const showToast = (msg, type = 'success') => setToast({ msg, type })
   const closeModal = () => setModal(null)
+  const isAdmin = profile?.role === 'admin'
+  const canEdit = profile?.role === 'admin' || profile?.role === 'editor'
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -368,7 +450,7 @@ export default function App() {
     const activeYearRow = years?.find(y => y.is_active) || years?.[0]
     setAllYears(years || [])
     setActiveYear(activeYearRow)
-    setSelectedYear(prev => prev || activeYearRow)
+    setSelectedYear(activeYearRow)
     setCats(buildCats(activeYearRow?.year, catsData, secs, stds))
     setLoading(false)
   }, [])
@@ -385,16 +467,13 @@ export default function App() {
     setLoading(false)
   }, [])
 
-  // ── Save edit / add ─────────────────────────────────────────────────
   const handleSaveEdit = async (form) => {
     setSaving(true)
     const cat = cats.find(c => c.key === modal.catKey)
     const sec = cat?.sections.find(s => s.key === modal.secKey)
     if (!sec) return
-
     const pos = form.position - 1
     let stds = [...sec.standards]
-
     if (modal.mode === 'edit') {
       const oldIdx = stds.findIndex(s => s.id === modal.std.id)
       stds.splice(oldIdx, 1)
@@ -402,44 +481,26 @@ export default function App() {
     } else {
       stds.splice(pos, 0, { title: form.title, type: form.type, commentary: form.commentary, evidence: form.evidence, section_id: sec.id, year_id: selectedYear.id })
     }
-
     stds = renumber(stds, sec.key)
-
-    const upserts = stds.map(s => ({
-      ...(s.id ? { id: s.id } : {}),
-      section_id: sec.id,
-      year_id: selectedYear.id,
-      std_key: s.std_key,
-      title: s.title,
-      type: s.type,
-      commentary: s.commentary || '',
-      evidence: s.evidence || [],
-      sort_order: s.sort_order
-    }))
-
+    const upserts = stds.map(s => ({ ...(s.id ? { id: s.id } : {}), section_id: sec.id, year_id: selectedYear.id, std_key: s.std_key, title: s.title, type: s.type, commentary: s.commentary || '', evidence: s.evidence || [], sort_order: s.sort_order }))
     const { error } = await supabase.from('standards').upsert(upserts, { onConflict: 'id' })
     if (error) { showToast('Save failed: ' + error.message, 'error'); setSaving(false); return }
-
     await switchYear(selectedYear)
     closeModal()
-    showToast(modal.mode === 'edit' ? 'Standard saved — history recorded' : 'Standard added')
+    showToast(modal.mode === 'edit' ? 'Saved — history recorded' : 'Standard added')
     setSaving(false)
   }
 
-  // ── Delete ──────────────────────────────────────────────────────────
   const handleDelete = async () => {
     setSaving(true)
     const { std, catKey: ck, secKey: sk } = modal
     const cat = cats.find(c => c.key === ck)
     const sec = cat?.sections.find(s => s.key === sk)
-
     await supabase.from('standards').delete().eq('id', std.id)
-
     const remaining = renumber(sec.standards.filter(s => s.id !== std.id), sk)
     if (remaining.length > 0) {
       await supabase.from('standards').upsert(remaining.map(s => ({ id: s.id, std_key: s.std_key, sort_order: s.sort_order, section_id: sec.id, year_id: selectedYear.id, title: s.title, type: s.type, commentary: s.commentary || '', evidence: s.evidence || [] })))
     }
-
     await switchYear(selectedYear)
     closeModal()
     showToast('Deleted — history recorded')
@@ -461,6 +522,7 @@ export default function App() {
 
   const currentCat = cats.find(c => c.key === catKey)
   const currentSec = currentCat?.sections.find(s => s.key === secKey)
+  const showEdit = canEdit && !isArchived
 
   if (!session) return <AuthPage />
   if (loading) return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999992', fontSize: 14, background: '#f2f1ef' }}>Loading standards…</div>
@@ -470,7 +532,7 @@ export default function App() {
 
       {isArchived && (
         <div style={{ background: '#faeeda', borderBottom: '0.5px solid #FAC775', padding: '8px 20px', fontSize: 12, color: '#633806', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <span>Viewing archived <strong>{selectedYear.year}</strong> standards — editing disabled for archived years.</span>
+          <span>Viewing archived <strong>{selectedYear.year}</strong> standards — editing disabled.</span>
           <button onClick={() => switchYear(activeYear)} style={{ fontSize: 11, padding: '2px 10px', background: '#fff', border: '0.5px solid #FAC775', borderRadius: 6, color: '#633806', cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto' }}>Return to {activeYear.year}</button>
         </div>
       )}
@@ -488,6 +550,8 @@ export default function App() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11, color: '#999992', padding: '3px 10px', background: '#f8f8f7', border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 20 }}>{totalStds} standards · {mandatoryStds} mandatory</span>
+
+          {/* Year switcher */}
           {allYears.length > 1 ? (
             <select value={selectedYear?.year || ''} onChange={e => { const y = allYears.find(yr => yr.year === parseInt(e.target.value)); if (y) switchYear(y) }}
               style={{ fontSize: 12, fontWeight: 500, padding: '4px 10px', background: '#e6f1fb', color: '#0c447c', border: '0.5px solid #B5D4F4', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit', outline: 'none' }}>
@@ -496,7 +560,23 @@ export default function App() {
           ) : (
             <span style={{ fontSize: 12, fontWeight: 500, padding: '4px 10px', background: '#e6f1fb', color: '#0c447c', border: '0.5px solid #B5D4F4', borderRadius: 20 }}>{selectedYear?.year}</span>
           )}
-          {profile?.full_name && <span style={{ fontSize: 12, color: '#555550', padding: '4px 10px', background: '#f8f8f7', border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 20 }}>{profile.full_name}</span>}
+
+          {/* Signed-in user + role */}
+          {profile?.full_name && (
+            <span style={{ fontSize: 12, color: '#555550', padding: '4px 10px', background: '#f8f8f7', border: '0.5px solid rgba(0,0,0,0.1)', borderRadius: 20 }}>
+              {profile.full_name}
+              <span style={{ marginLeft: 6, fontSize: 10, color: '#999992' }}>({profile.role})</span>
+            </span>
+          )}
+
+          {/* Users button — admin only */}
+          {isAdmin && (
+            <button onClick={() => setModal({ type: 'users' })}
+              style={{ fontSize: 12, padding: '5px 12px', background: '#EEEDFE', color: '#3C3489', border: '0.5px solid #AFA9EC', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+              Users
+            </button>
+          )}
+
           <button onClick={() => setModal({ type: 'export' })} style={{ background: '#e1f5ee', color: '#085041', border: '0.5px solid #9FE1CB', fontWeight: 500, fontSize: 12, padding: '5px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>Export</button>
           <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 12, color: '#999992', padding: '5px 12px', background: 'none', border: '0.5px solid rgba(0,0,0,0.12)', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>Sign out</button>
         </div>
@@ -540,10 +620,10 @@ export default function App() {
               <div style={{ padding: '0 24px 24px' }}>
                 <div style={{ padding: '18px 0 14px', fontSize: 18, fontWeight: 600, color: '#1a1a1a' }}>{searchResults.length} result{searchResults.length !== 1 ? 's' : ''} for "{search}"</div>
                 {searchResults.length === 0 && <div style={{ color: '#999992', fontSize: 14 }}>No standards matched.</div>}
-                {searchResults.map(std => <StdCard key={std.id} std={std} showMeta
-                  onEdit={std => !isArchived && setModal({ type: 'edit', mode: 'edit', catKey: std.category_key, secKey: std.section_key, std })}
-                  onDelete={std => !isArchived && setModal({ type: 'deleteConfirm', catKey: std.category_key, secKey: std.section_key, std })}
-                  onHistory={std => setModal({ type: 'history', std })} />)}
+                {searchResults.map(std => <StdCard key={std.id} std={std} showMeta canEdit={showEdit}
+                  onEdit={s => setModal({ type: 'edit', mode: 'edit', catKey: s.category_key, secKey: s.section_key, std: s })}
+                  onDelete={s => setModal({ type: 'deleteConfirm', catKey: s.category_key, secKey: s.section_key, std: s })}
+                  onHistory={s => setModal({ type: 'history', std: s })} />)}
               </div>
             ) : !secKey ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999992', fontSize: 14 }}>Select a section to view its standards.</div>
@@ -554,7 +634,7 @@ export default function App() {
                     <div style={{ fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: '#999992' }}>{secKey}</div>
                     <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a', marginTop: 4 }}>{currentSec?.title}</div>
                   </div>
-                  {!isArchived && (
+                  {showEdit && (
                     <button onClick={() => setModal({ type: 'edit', mode: 'add', catKey, secKey, std: { title: '', type: 'O', commentary: '', evidence: [], sort_order: currentSec.standards.length } })}
                       style={{ background: '#e6f1fb', color: '#0c447c', border: '0.5px solid #B5D4F4', fontWeight: 500, fontSize: 12, padding: '6px 14px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}>
                       + Add standard
@@ -563,10 +643,10 @@ export default function App() {
                 </div>
                 {currentSec?.standards.length === 0 && <div style={{ textAlign: 'center', padding: '50px 0', color: '#999992', fontSize: 14 }}>No standards in this section yet.</div>}
                 {currentSec?.standards.map(std => (
-                  <StdCard key={std.id} std={std}
-                    onEdit={std => setModal({ type: 'edit', mode: 'edit', catKey, secKey, std })}
-                    onDelete={std => setModal({ type: 'deleteConfirm', catKey, secKey, std })}
-                    onHistory={std => setModal({ type: 'history', std })} />
+                  <StdCard key={std.id} std={std} canEdit={showEdit}
+                    onEdit={s => setModal({ type: 'edit', mode: 'edit', catKey, secKey, std: s })}
+                    onDelete={s => setModal({ type: 'deleteConfirm', catKey, secKey, std: s })}
+                    onHistory={s => setModal({ type: 'history', std: s })} />
                 ))}
               </div>
             )}
@@ -575,17 +655,19 @@ export default function App() {
       </div>
 
       {/* Modals */}
+      {modal?.type === 'users' && (
+        <UsersModal onClose={closeModal} currentUserId={session?.user?.id} showToast={showToast} />
+      )}
       {modal?.type === 'edit' && (
         <EditModal std={modal.std} mode={modal.mode} sectionKey={modal.secKey}
           totalInSection={cats.find(c => c.key === modal.catKey)?.sections.find(s => s.key === modal.secKey)?.standards.length || 0}
           onSave={handleSaveEdit} onClose={closeModal} />
       )}
-
       {modal?.type === 'deleteConfirm' && (
         <Modal onClose={closeModal}>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, color: '#1a1a1a' }}>Delete standard?</div>
           <div style={{ fontSize: 13, color: '#555550', lineHeight: 1.7, marginBottom: 22 }}>
-            This will permanently remove <strong>{modal.std.std_key} — {modal.std.title}</strong>. A record of this deletion will be saved to version history. Remaining standards will renumber automatically.
+            Permanently remove <strong>{modal.std.std_key} — {modal.std.title}</strong>? A record of this deletion will be saved to version history. Remaining standards will renumber automatically.
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button onClick={closeModal} style={{ padding: '7px 16px', fontFamily: 'inherit' }}>Cancel</button>
@@ -595,7 +677,6 @@ export default function App() {
           </div>
         </Modal>
       )}
-
       {modal?.type === 'history' && <HistoryModal std={modal.std} onClose={closeModal} />}
       {modal?.type === 'export' && <ExportModal onClose={closeModal} cats={cats} year={selectedYear?.year} />}
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
